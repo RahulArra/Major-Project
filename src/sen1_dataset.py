@@ -1,4 +1,6 @@
 import os
+import random
+
 import numpy as np
 import pandas as pd
 import rasterio
@@ -8,14 +10,36 @@ from torch.utils.data import Dataset
 
 class Sen1FloodsDataset(Dataset):
 
-    MEAN = np.array([-10.3929, -17.2411], dtype=np.float32)
-    STD = np.array([4.0388, 4.7540], dtype=np.float32)
+    MEAN = np.array(
+        [-10.3929, -17.2411],
+        dtype=np.float32
+    )
 
-    def __init__(self, split_file):
-        self.s1_dir = "data/raw/sen1floods11/S1Hand"
-        self.label_dir = "data/raw/sen1floods11/LabelHand"
+    STD = np.array(
+        [4.0388, 4.7540],
+        dtype=np.float32
+    )
 
-        self.df = pd.read_csv(split_file, header=None)
+    def __init__(
+        self,
+        split_file,
+        augment=False
+    ):
+
+        self.s1_dir = (
+            "data/raw/sen1floods11/S1Hand"
+        )
+
+        self.label_dir = (
+            "data/raw/sen1floods11/LabelHand"
+        )
+
+        self.df = pd.read_csv(
+            split_file,
+            header=None
+        )
+
+        self.augment = augment
 
     def __len__(self):
         return len(self.df)
@@ -25,65 +49,155 @@ class Sen1FloodsDataset(Dataset):
         image_name = self.df.iloc[index, 0]
         label_name = self.df.iloc[index, 1]
 
-        image_path = os.path.join(self.s1_dir, image_name)
-        label_path = os.path.join(self.label_dir, label_name)
+        image_path = os.path.join(
+            self.s1_dir,
+            image_name
+        )
 
-        # Read Sentinel-1 image
+        label_path = os.path.join(
+            self.label_dir,
+            label_name
+        )
+
+        # -------------------------
+        # Read image
+        # -------------------------
+
         with rasterio.open(image_path) as src:
-            image = src.read().astype(np.float32)
+            image = src.read().astype(
+                np.float32
+            )
 
-        # Read ground-truth label
+        # -------------------------
+        # Read label
+        # -------------------------
+
         with rasterio.open(label_path) as src:
             label = src.read(1)
 
-        # Replace non-finite SAR values
+        # -------------------------
+        # Invalid SAR values
+        # -------------------------
+
         for band in range(2):
-            invalid = ~np.isfinite(image[band])
-            image[band][invalid] = self.MEAN[band]
 
-        # Normalize each Sentinel-1 band
-        image = (image - self.MEAN[:, None, None]) / self.STD[:, None, None]
+            invalid = ~np.isfinite(
+                image[band]
+            )
 
-        # Create ignore mask
+            image[band][invalid] = (
+                self.MEAN[band]
+            )
+
+        # -------------------------
+        # Normalization
+        # -------------------------
+
+        image = (
+            image
+            - self.MEAN[:, None, None]
+        ) / self.STD[:, None, None]
+
+        # -------------------------
+        # Ignore mask
+        # -------------------------
+
         ignore_mask = label == -1
 
-        # Convert labels:
-        # 0 = background
-        # 1 = flood
-        label = np.where(label == 1, 1, 0).astype(np.float32)
+        # Flood = 1
+        # Everything else = 0
+        label = np.where(
+            label == 1,
+            1,
+            0
+        ).astype(np.float32)
 
-        # Convert ignored pixels to 0 in target.
-        # The ignore mask tells the loss to exclude them later.
         label[ignore_mask] = 0
 
-        image = torch.from_numpy(image)
-        label = torch.from_numpy(label)
-        ignore_mask = torch.from_numpy(ignore_mask)
+        # -------------------------
+        # Data augmentation
+        # -------------------------
 
-        return image, label, ignore_mask
+        if self.augment:
 
+            # Horizontal flip
+            if random.random() < 0.5:
 
-if __name__ == "__main__":
+                image = np.flip(
+                    image,
+                    axis=2
+                ).copy()
 
-    dataset = Sen1FloodsDataset(
-        "data/raw/sen1floods11/splits/flood_train_data.csv"
-    )
+                label = np.flip(
+                    label,
+                    axis=1
+                ).copy()
 
-    print("Dataset size:", len(dataset))
+                ignore_mask = np.flip(
+                    ignore_mask,
+                    axis=1
+                ).copy()
 
-    image, label, ignore_mask = dataset[0]
+            # Vertical flip
+            if random.random() < 0.5:
 
-    print("\nImage")
-    print("Shape:", image.shape)
-    print("Dtype:", image.dtype)
-    print("Min:", image.min().item())
-    print("Max:", image.max().item())
+                image = np.flip(
+                    image,
+                    axis=1
+                ).copy()
 
-    print("\nLabel")
-    print("Shape:", label.shape)
-    print("Dtype:", label.dtype)
-    print("Unique:", torch.unique(label))
+                label = np.flip(
+                    label,
+                    axis=0
+                ).copy()
 
-    print("\nIgnore mask")
-    print("Shape:", ignore_mask.shape)
-    print("Ignored pixels:", ignore_mask.sum().item())
+                ignore_mask = np.flip(
+                    ignore_mask,
+                    axis=0
+                ).copy()
+
+            # 90-degree rotation
+            if random.random() < 0.5:
+
+                k = random.randint(
+                    1,
+                    3
+                )
+
+                image = np.rot90(
+                    image,
+                    k=k,
+                    axes=(1, 2)
+                ).copy()
+
+                label = np.rot90(
+                    label,
+                    k=k
+                ).copy()
+
+                ignore_mask = np.rot90(
+                    ignore_mask,
+                    k=k
+                ).copy()
+
+        # -------------------------
+        # Convert to tensors
+        # -------------------------
+
+        image = torch.from_numpy(
+            image
+        )
+
+        label = torch.from_numpy(
+            label
+        )
+
+        ignore_mask = torch.from_numpy(
+            ignore_mask
+        )
+
+        return (
+            image,
+            label,
+            ignore_mask
+        )

@@ -1,0 +1,35 @@
+.venv/
+.venv_*/
+venv/
+__pycache__/
+*.pyc
+
+data/raw/
+data/processed/
+data/samples/
+
+outputs/
+
+# Model weights and experiment checkpoint directories
+checkpoints/
+checkpoints_*/
+tversky_checkpoints/
+experiment_checkpoints/
+*.pth
+*.pt
+*.ckpt
+
+# Generated experiment results and local histories
+results/
+/experiment_results.csv
+/tversky_experiments.csv
+
+# Local IDE and operating-system files
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+
+.ipynb_checkpoints/
+
+.env
